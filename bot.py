@@ -7,12 +7,12 @@ from flask import Flask
 import telebot
 import instaloader
 
-# Render uchun web-server
+# Render serveri uxlab qolmasligi uchun web server
 app = Flask(__name__)
 
 @app.route('/')
 def home():
-    return "Bot 24/7 faol!"
+    return "Bot Render'da 24/7 faol ishlamoqda!"
 
 def run_web():
     port = int(os.environ.get("PORT", 8080))
@@ -38,19 +38,19 @@ L = instaloader.Instaloader(
     filename_pattern="{shortcode}"
 )
 
-# Qotib qolmaslik uchun so'rovlar chegarasi
 L.context.max_connection_attempts = 1
 
-# Render Environment'dan login va parolni olish
+# Render Environment'dan login va parolni yuklash
 INSTA_USER = os.environ.get("INSTA_USER", "music_dj_nexor")
-INSTA_PASS = os.environ.get("INSTA_PASS", "Temur1998")
+INSTA_PASS = os.environ.get("INSTA_PASS")
 
-try:
-    print(f"Instagram akkauntiga kirilmoqda (@{INSTA_USER})...")
-    L.login(INSTA_USER, INSTA_PASS)
-    print("✅ Instagram akkauntiga muvaffaqiyatli kirildi!")
-except Exception as e:
-    print(f"⚠️ Instagram login eslatmasi: {e}")
+if INSTA_USER and INSTA_PASS:
+    try:
+        print(f"Instagram akkauntiga kirilmoqda (@{INSTA_USER})...", flush=True)
+        L.login(INSTA_USER, INSTA_PASS)
+        print("✅ Instagram tizimiga muvaffaqiyatli kirildi!", flush=True)
+    except Exception as e:
+        print(f"⚠️ Kirish holati: {e}", flush=True)
 
 def clean_temp_files(shortcode):
     for f in glob.glob(os.path.join(DOWNLOAD_DIR, f"*{shortcode}*")):
@@ -60,6 +60,7 @@ def clean_temp_files(shortcode):
             pass
 
 def send_pure_video(chat_id, post):
+    """Faqat toza video faylini Telegramga yuborish"""
     shortcode = post.shortcode
     try:
         L.download_post(post, target=DOWNLOAD_DIR)
@@ -86,7 +87,7 @@ def send_pure_video(chat_id, post):
 def start_cmd(message):
     bot.reply_to(
         message,
-        "Assalomu alaykum! Men Instagram Reels yuklovchi botman.\n\n"
+        "Assalomu alaykum! Men to'liq onlayn ishlovchi Reels yuklovchi botman.\n\n"
         "Menga yulduzning profilini yoki heshtegni yozing (masalan: <code>you_r_love</code> yoki <code>cristiano</code>).",
         parse_mode="HTML"
     )
@@ -95,7 +96,7 @@ def start_cmd(message):
 def handle_query(message):
     query = message.text.strip().lower().replace("@", "").replace("#", "").replace(" ", "")
 
-    status = bot.reply_to(message, f"⚡ '{query}' bo'yicha eng sara videolar yuklanmoqda...")
+    status = bot.reply_to(message, f"⚡ '{query}' bo'yicha Instagram tahlil qilinmoqda...")
 
     found = []
 
@@ -107,12 +108,12 @@ def handle_query(message):
             if p.is_video:
                 found.append((p.video_view_count or p.likes or 0, p))
             c += 1
-            if c >= 15:
+            if c >= 20:
                 break
     except Exception as e:
-        print(f"Profil: {e}")
+        print(f"Profil xatosi: {e}", flush=True)
 
-    # 2. Agar profildan topilmasa, heshtegdan qidirish
+    # 2. Heshteglardan eng ko'p ko'rilganlarini qidirish
     if len(found) < 3:
         try:
             ht = instaloader.Hashtag.from_name(L.context, query)
@@ -124,16 +125,17 @@ def handle_query(message):
                 if c >= 15:
                     break
         except Exception as e:
-            print(f"Heshteg: {e}")
+            print(f"Heshteg xatosi: {e}", flush=True)
 
     if not found:
         bot.edit_message_text(
-            f"❌ '{query}' bo'yicha video topilmadi. Profil nomini to'g'ri yozganingizga ishonch hosil qiling.",
+            f"❌ '{query}' bo'yicha video topilmadi. Nom to'g'ri yozilganini tekshiring.",
             message.chat.id,
             status.message_id
         )
         return
 
+    # Ko'rishlar soni bo'yicha saralash
     found.sort(key=lambda x: x[0], reverse=True)
     top_videos = [p for _, p in found[:10]]
 
@@ -144,7 +146,7 @@ def handle_query(message):
         time.sleep(1)
 
 if __name__ == "__main__":
-    print("Bot 24/7 rejimda ishga tushdi...")
+    print("Bot Render'da ishga tushdi...", flush=True)
     while True:
         try:
             bot.infinity_polling(timeout=30, long_polling_timeout=20, skip_pending=True)
