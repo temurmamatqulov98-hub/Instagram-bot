@@ -7,12 +7,12 @@ from flask import Flask
 import telebot
 import instaloader
 
-# Render uchun web server
+# Render uchun web-server
 app = Flask(__name__)
 
 @app.route('/')
 def home():
-    return "Bot 24/7 rejimda faol!"
+    return "Bot 24/7 faol!"
 
 def run_web():
     port = int(os.environ.get("PORT", 8080))
@@ -26,6 +26,7 @@ DOWNLOAD_DIR = "temp_reels"
 os.makedirs(DOWNLOAD_DIR, exist_ok=True)
 bot = telebot.TeleBot(BOT_TOKEN)
 
+# Instaloader
 L = instaloader.Instaloader(
     download_pictures=False,
     download_videos=True,
@@ -37,8 +38,19 @@ L = instaloader.Instaloader(
     filename_pattern="{shortcode}"
 )
 
-# Agar zaxira Instagram akkauntingiz bo'lsa, quyidagi 2 qatordagi panjarani (#) olib, login-parolni yozsangiz 100% hech qanday cheklovlarsiz ishlaydi:
-# L.login("INSTAGRAM_LOGIN", "INSTAGRAM_PAROL")
+# Qotib qolmaslik uchun so'rovlar chegarasi
+L.context.max_connection_attempts = 1
+
+# Render Environment'dan login va parolni olish
+INSTA_USER = os.environ.get("INSTA_USER", "music_dj_nexor")
+INSTA_PASS = os.environ.get("INSTA_PASS", "Temur1998")
+
+try:
+    print(f"Instagram akkauntiga kirilmoqda (@{INSTA_USER})...")
+    L.login(INSTA_USER, INSTA_PASS)
+    print("✅ Instagram akkauntiga muvaffaqiyatli kirildi!")
+except Exception as e:
+    print(f"⚠️ Instagram login eslatmasi: {e}")
 
 def clean_temp_files(shortcode):
     for f in glob.glob(os.path.join(DOWNLOAD_DIR, f"*{shortcode}*")):
@@ -72,14 +84,18 @@ def send_pure_video(chat_id, post):
 
 @bot.message_handler(commands=['start'])
 def start_cmd(message):
-    bot.reply_to(message, "Salom! Men Instagram Reels yuklovchi botman. Menga yulduzning profilini yoki heshtegni yozing (masalan: <code>cristiano</code> yoki <code>kimyoujung</code>).", parse_mode="HTML")
+    bot.reply_to(
+        message,
+        "Assalomu alaykum! Men Instagram Reels yuklovchi botman.\n\n"
+        "Menga yulduzning profilini yoki heshtegni yozing (masalan: <code>you_r_love</code> yoki <code>cristiano</code>).",
+        parse_mode="HTML"
+    )
 
 @bot.message_handler(func=lambda msg: True)
 def handle_query(message):
-    # Probellarni va belgilarni avtomatik tozalaymiz (kim you jung -> kimyoujung)
     query = message.text.strip().lower().replace("@", "").replace("#", "").replace(" ", "")
 
-    status = bot.reply_to(message, f"⚡ '{query}' bo'yicha videolar qidirilmoqda...")
+    status = bot.reply_to(message, f"⚡ '{query}' bo'yicha eng sara videolar yuklanmoqda...")
 
     found = []
 
@@ -93,10 +109,10 @@ def handle_query(message):
             c += 1
             if c >= 15:
                 break
-    except Exception:
-        pass
+    except Exception as e:
+        print(f"Profil: {e}")
 
-    # 2. Agar profildan topilmasa, toza heshtegdan qidirish
+    # 2. Agar profildan topilmasa, heshtegdan qidirish
     if len(found) < 3:
         try:
             ht = instaloader.Hashtag.from_name(L.context, query)
@@ -107,14 +123,17 @@ def handle_query(message):
                 c += 1
                 if c >= 15:
                     break
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"Heshteg: {e}")
 
     if not found:
-        bot.edit_message_text(f"❌ '{query}' bo'yicha video topilmadi. Profil nomini to'g'ri kiritganingizga ishonch hosil qiling (masalan: cristiano, khaby00).", message.chat.id, status.message_id)
+        bot.edit_message_text(
+            f"❌ '{query}' bo'yicha video topilmadi. Profil nomini to'g'ri yozganingizga ishonch hosil qiling.",
+            message.chat.id,
+            status.message_id
+        )
         return
 
-    # Ko'rishlar bo'yicha saralash
     found.sort(key=lambda x: x[0], reverse=True)
     top_videos = [p for _, p in found[:10]]
 
@@ -125,7 +144,7 @@ def handle_query(message):
         time.sleep(1)
 
 if __name__ == "__main__":
-    print("Bot ishga tushdi...")
+    print("Bot 24/7 rejimda ishga tushdi...")
     while True:
         try:
             bot.infinity_polling(timeout=30, long_polling_timeout=20, skip_pending=True)
