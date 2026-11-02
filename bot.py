@@ -7,12 +7,12 @@ from flask import Flask
 import telebot
 import instaloader
 
-# Render.com da 24/7 uxlab qolmasligi uchun fon Web-serveri
+# Render uchun web server
 app = Flask(__name__)
 
 @app.route('/')
 def home():
-    return "Bot 24/7 rejimda faol ishlayapti!"
+    return "Bot 24/7 rejimda faol!"
 
 def run_web():
     port = int(os.environ.get("PORT", 8080))
@@ -23,9 +23,6 @@ threading.Thread(target=run_web, daemon=True).start()
 # --- SOZLAMALAR ---
 BOT_TOKEN = "9154702002:AAEP2gpIhAx9xxe4ry65EP1PqzvroCfXzxA"
 DOWNLOAD_DIR = "temp_reels"
-CHECK_INTERVAL_SECONDS = 300
-RECENT_HOURS_LIMIT = 5
-
 os.makedirs(DOWNLOAD_DIR, exist_ok=True)
 bot = telebot.TeleBot(BOT_TOKEN)
 
@@ -40,8 +37,8 @@ L = instaloader.Instaloader(
     filename_pattern="{shortcode}"
 )
 
-tracked_queries = {}
-lock = threading.Lock()
+# Agar zaxira Instagram akkauntingiz bo'lsa, quyidagi 2 qatordagi panjarani (#) olib, login-parolni yozsangiz 100% hech qanday cheklovlarsiz ishlaydi:
+# L.login("INSTAGRAM_LOGIN", "INSTAGRAM_PAROL")
 
 def clean_temp_files(shortcode):
     for f in glob.glob(os.path.join(DOWNLOAD_DIR, f"*{shortcode}*")):
@@ -70,142 +67,67 @@ def send_pure_video(chat_id, post):
         clean_temp_files(shortcode)
         return True
     except Exception as e:
-        print(f"Yuklashda xato ({shortcode}): {e}")
         clean_temp_files(shortcode)
         return False
 
-def is_recent(post, hours=5):
-    try:
-        now = datetime.now(timezone.utc)
-        post_time = post.date_utc.replace(tzinfo=timezone.utc)
-        return (now - post_time).total_seconds() / 3600 <= hours
-    except Exception:
-        return False
-
-def scan_all_instagram(query):
-    candidates = {}
-    recent_videos = []
-
-    try:
-        profile = instaloader.Profile.from_username(L.context, query)
-        p_count = 0
-        for post in profile.get_posts():
-            if post.is_video:
-                candidates[post.shortcode] = post
-                if is_recent(post, RECENT_HOURS_LIMIT):
-                    recent_videos.append(post)
-            p_count += 1
-            if p_count >= 25:
-                break
-
-        try:
-            t_count = 0
-            for post in profile.get_tagged_posts():
-                if post.is_video and post.shortcode not in candidates:
-                    candidates[post.shortcode] = post
-                    if is_recent(post, RECENT_HOURS_LIMIT):
-                        recent_videos.append(post)
-                t_count += 1
-                if t_count >= 15:
-                    break
-        except Exception:
-            pass
-    except Exception as e:
-        print(f"Profil xatosi: {e}")
-
-    hashtags = [query, f"{query}reels"]
-    for tag in hashtags:
-        try:
-            ht = instaloader.Hashtag.from_name(L.context, tag)
-            for post in ht.get_top_posts():
-                if post.is_video and post.shortcode not in candidates:
-                    candidates[post.shortcode] = post
-                    if is_recent(post, RECENT_HOURS_LIMIT):
-                        recent_videos.append(post)
-                if len(candidates) >= 40:
-                    break
-        except Exception:
-            continue
-
-    return candidates, recent_videos
-
-def monitor_loop():
-    while True:
-        try:
-            time.sleep(CHECK_INTERVAL_SECONDS)
-            with lock:
-                items = list(tracked_queries.items())
-
-            for query, data in items:
-                all_found, _ = scan_all_instagram(query)
-                for sc, post in all_found.items():
-                    if sc not in data["seen_shortcodes"]:
-                        data["seen_shortcodes"].add(sc)
-                        for chat_id in data["chat_ids"]:
-                            send_pure_video(chat_id, post)
-                            time.sleep(2)
-        except Exception as e:
-            print(f"Monitoring xatosi: {e}")
-            time.sleep(60)
-
 @bot.message_handler(commands=['start'])
 def start_cmd(message):
-    bot.reply_to(message, "Tayyorman! Menga istalgan nomni yozing (masalan: <code>cristiano</code>).", parse_mode="HTML")
+    bot.reply_to(message, "Salom! Men Instagram Reels yuklovchi botman. Menga yulduzning profilini yoki heshtegni yozing (masalan: <code>cristiano</code> yoki <code>kimyoujung</code>).", parse_mode="HTML")
 
 @bot.message_handler(func=lambda msg: True)
 def handle_query(message):
-    query = message.text.strip().lower().replace("@", "").replace("#", "")
-    status_msg = bot.reply_to(message, f"⚡ '{query}' bo'yicha qidirilmoqda, videolar hoziroq kela boshlaydi...")
+    # Probellarni va belgilarni avtomatik tozalaymiz (kim you jung -> kimyoujung)
+    query = message.text.strip().lower().replace("@", "").replace("#", "").replace(" ", "")
 
-    all_found, recent_videos = scan_all_instagram(query)
+    status = bot.reply_to(message, f"⚡ '{query}' bo'yicha videolar qidirilmoqda...")
 
-    if not all_found:
-        bot.edit_message_text(f"❌ '{query}' bo'yicha video topilmadi.", message.chat.id, status_msg.message_id)
-        return
+    found = []
 
-    sorted_by_views = sorted(
-        all_found.values(),
-        key=lambda p: (p.video_view_count or p.likes or 0),
-        reverse=True
-    )
-
-    to_send = []
-    sent_ids = set()
-
-    for p in recent_videos:
-        if p.shortcode not in sent_ids:
-            to_send.append(p)
-            sent_ids.add(p.shortcode)
-
-    for p in sorted_by_views:
-        if p.shortcode not in sent_ids:
-            to_send.append(p)
-            sent_ids.add(p.shortcode)
-        if len(to_send) >= 12:
-            break
-
+    # 1. Profil sifatida tekshirish
     try:
-        bot.delete_message(message.chat.id, status_msg.message_id)
+        profile = instaloader.Profile.from_username(L.context, query)
+        c = 0
+        for p in profile.get_posts():
+            if p.is_video:
+                found.append((p.video_view_count or p.likes or 0, p))
+            c += 1
+            if c >= 15:
+                break
     except Exception:
         pass
 
-    for post in to_send:
-        send_pure_video(message.chat.id, post)
+    # 2. Agar profildan topilmasa, toza heshtegdan qidirish
+    if len(found) < 3:
+        try:
+            ht = instaloader.Hashtag.from_name(L.context, query)
+            c = 0
+            for p in ht.get_top_posts():
+                if p.is_video:
+                    found.append((p.video_view_count or p.likes or 0, p))
+                c += 1
+                if c >= 15:
+                    break
+        except Exception:
+            pass
+
+    if not found:
+        bot.edit_message_text(f"❌ '{query}' bo'yicha video topilmadi. Profil nomini to'g'ri kiritganingizga ishonch hosil qiling (masalan: cristiano, khaby00).", message.chat.id, status.message_id)
+        return
+
+    # Ko'rishlar bo'yicha saralash
+    found.sort(key=lambda x: x[0], reverse=True)
+    top_videos = [p for _, p in found[:10]]
+
+    bot.edit_message_text(f"🔥 {len(top_videos)} ta sara video topildi! Bittalab yuborilmoqda...", message.chat.id, status.message_id)
+
+    for p in top_videos:
+        send_pure_video(message.chat.id, p)
         time.sleep(1)
 
-    with lock:
-        seen = set(all_found.keys())
-        if query not in tracked_queries:
-            tracked_queries[query] = {"chat_ids": {message.chat.id}, "seen_shortcodes": seen}
-        else:
-            tracked_queries[query]["chat_ids"].add(message.chat.id)
-            tracked_queries[query]["seen_shortcodes"].update(seen)
-
 if __name__ == "__main__":
-    threading.Thread(target=monitor_loop, daemon=True).start()
-    print("Bot 24/7 rejimda ishga tushdi...")
+    print("Bot ishga tushdi...")
     while True:
         try:
             bot.infinity_polling(timeout=30, long_polling_timeout=20, skip_pending=True)
-        except Exception as e:
+        except Exception:
             time.sleep(5)
